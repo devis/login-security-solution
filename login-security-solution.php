@@ -52,7 +52,8 @@ class login_security_solution {
 
 
 	const E_ASCII = 'pw-ascii';
-	const E_CASE = 'pw-case';
+	const E_LOWERCASE = 'pw-lowercase';
+	const E_UPPERCASE = 'pw-uppercase';
 	const E_COMMON = 'pw-common';
 	const E_DICT = 'pw-dict';
 	const E_EMPTY = 'pw-empty';
@@ -156,6 +157,10 @@ class login_security_solution {
 		'pw_change_days' => 0,
 		'pw_change_grace_period_minutes' => 15,
 		'pw_complexity_exemption_length' => 20,
+		'pw_complexity_uppercase_length' => 1,
+		'pw_complexity_lowercase_length' => 1,
+		'pw_complexity_number_length' => 1,
+		'pw_complexity_special_length' => 1,
 		'pw_length' => 10,
 		'pw_reuse_count' => 0,
 	);
@@ -1925,46 +1930,113 @@ Password MD5                 %5d     %s
 	 * @return bool
 	 */
 	protected function is_pw_missing_numeric($pw) {
-		return !preg_match('/\d/u', $pw);
+		if (!preg_match('/[\p{N}]/u', $pw)) {
+			return true;
+		}
+		$count = $this->strlen($pw) - $this->strlen(preg_replace('/[\p{N}]+/u', '', $pw));
+		if ($count < (int) $this->options['pw_complexity_number_length'] ) {
+			return true;
+		}
+		return false;
 	}
 
 	/**
-	 * Does the password lack punctuation characters?
+	 * Does the password lack punctuation/symbol characters?
 	 *
 	 * @param string $pw  the password to examine
 	 * @return bool
 	 */
 	protected function is_pw_missing_punct_chars($pw) {
-		return !preg_match('/[^\p{L}\p{Nd}]/u', $pw);
+		if (!preg_match('/[\p{P}|\p{S}]/u', $pw)) {
+			return true;
+		}
+		$count = $this->strlen($pw) - $this->strlen(preg_replace('/[\p{P}|\p{S}]+/u', '', $pw));
+		if ($count < (int) $this->options['pw_complexity_special_length'] ) {
+			return true;
+		}
+		return false;
 	}
 
 	/**
-	 * Does the password lack upper-case letters and lower-case letters?
+	 * Does the password lack lower-case letters?
 	 *
 	 * @param string $pw  the password to examine
 	 * @return bool
 	 */
-	protected function is_pw_missing_upper_lower_chars($pw) {
+	protected function is_pw_missing_lower_chars($pw) {
 		if ($this->available_mbstring) {
-			$upper = mb_strtoupper($pw);
 			$lower = mb_strtolower($pw);
+			$upper = mb_strtoupper($pw);
 			if ($upper == $lower) {
-				if (preg_match('/^[\P{L}\p{Nd}]+$/u', $pw)) {
-					// Contains only numbers or punctuation.  Sorry, Charlie.
+				if (preg_match('/^[\p{P}|\p{N}|\p{S}]+$/u', $pw)) {
+					// Contains only numbers, symbols, or punctuation.  Sorry, Charlie.
 					return true;
 				}
-				// Unicameral alphabet.  That's cool.
+				// Unicameral alphabet. That's cool.
 				return false;
 			}
-			if ($pw != $lower && $pw != $upper) {
+			if ($pw != $upper) {
+				$chars = $this->strip_nonword_chars($upper);
+				$chars = $this->split($chars);
+				$lowers = $this->strip_nonword_chars($pw);
+				foreach ($chars as $char) {
+					$lowers = mb_ereg_replace($char, '', $lowers);
+				}
+				$count = $this->strlen($lowers);
+				if ($count >= (int) $this->options['pw_complexity_lowercase_length'] ) {
+					return false;
+				}
+			}
+			return true;
+		} else {
+			if (!preg_match('/[[:lower:]]/u', $pw)) {
+				return true;
+			}
+			$count = strlen($pw) - strlen(preg_replace('/[[:lower:]]/u', '', $pw));
+			if ($count < (int) $this->options['pw_complexity_lowercase_length'] ) {
+				return true;
+			}
+			return false;
+		}
+	}
+
+	/**
+	 * Does the password lack upper-case letters?
+	 *
+	 * @param string $pw  the password to examine
+	 * @return bool
+	 */
+	protected function is_pw_missing_upper_chars($pw) {
+		if ($this->available_mbstring) {
+			$lower = mb_strtolower($pw);
+			$upper = mb_strtoupper($pw);
+			if ($upper == $lower) {
+				if (preg_match('/^[\p{P}|\p{N}|\p{S}]+$/u', $pw)) {
+					// Contains only numbers, symbols, or punctuation.  Sorry, Charlie.
+					return true;
+				}
+				// Unicameral alphabet. That's cool.
 				return false;
+			}
+			if ($pw != $lower) {
+				$chars = $this->strip_nonword_chars($lower);
+				$chars = $this->split($chars);
+				$uppers = $this->strip_nonword_chars($pw);
+				foreach ($chars as $char) {
+					$uppers = mb_ereg_replace($char, '', $uppers);
+				}
+				$count = $this->strlen($uppers);
+				if ($count >= (int) $this->options['pw_complexity_uppercase_length'] ) {
+					return false;
+				}
 			}
 			return true;
 		} else {
 			if (!preg_match('/[[:upper:]]/u', $pw)) {
 				return true;
 			}
-			if (!preg_match('/[[:lower:]]/u', $pw)) {
+			$count = strlen($pw) - strlen(preg_replace('/[[:upper:]]/u', '', $pw));
+			if ($count < (int) $this->options['pw_complexity_uppercase_length'] ) {
 				return true;
 			}
 			return false;
@@ -2134,8 +2206,10 @@ Password MD5                 %5d     %s
 		switch ($code) {
 			case self::E_ASCII:
 				return __("Passwords must use ASCII characters.", self::ID);
-			case self::E_CASE:
-				return sprintf(__("Passwords must either contain upper-case and lower-case letters or be %d characters long.", self::ID), $this->options['pw_complexity_exemption_length']);
+			case self::E_LOWERCASE:
+				return sprintf(__("Passwords must either contain lower-case letters or be %d characters long.", self::ID), $this->options['pw_complexity_exemption_length']);
+			case self::E_UPPERCASE:
+				return sprintf(__("Passwords must either contain upper-case letters or be %d characters long.", self::ID), $this->options['pw_complexity_exemption_length']);
 			case self::E_COMMON:
 				return __("Password is too common.", self::ID);
 			case self::E_DICT:
@@ -3036,7 +3110,9 @@ Password MD5                 %5d     %s
 			}
 			return false;
 		}
-		if ($enforce_complexity && $this->is_pw_missing_numeric($pw)) {
+		if ($enforce_complexity &&
+			$this->options['pw_complexity_number_length'] &&
+			$this->is_pw_missing_numeric($pw)) {
 			if ($errors !== null) {
 				$errors->add(self::ID . '_' . self::E_NUMBER,
 					$this->err($this->msg(self::E_NUMBER)),
@@ -3045,7 +3121,9 @@ Password MD5                 %5d     %s
 			}
 			return false;
 		}
-		if ($enforce_complexity && $this->is_pw_missing_punct_chars($pw)) {
+		if ($enforce_complexity &&
+			$this->options['pw_complexity_special_length'] &&
+			$this->is_pw_missing_punct_chars($pw)) {
 			if ($errors !== null) {
 				$errors->add(self::ID . '_' . self::E_PUNCT,
 					$this->err($this->msg(self::E_PUNCT)),
@@ -3054,10 +3132,23 @@ Password MD5                 %5d     %s
 			}
 			return false;
 		}
-		if ($enforce_complexity && $this->is_pw_missing_upper_lower_chars($pw)) {
+		if ($enforce_complexity &&
+			$this->options['pw_complexity_lowercase_length'] &&
+			$this->is_pw_missing_lower_chars($pw)) {
 			if ($errors !== null) {
-				$errors->add(self::ID . '_' . self::E_CASE,
-					$this->err($this->msg(self::E_CASE)),
+				$errors->add(self::ID . '_' . self::E_LOWERCASE,
+					$this->err($this->msg(self::E_LOWERCASE)),
+					array('form-field' => 'pass1')
+				);
+			}
+			return false;
+		}
+		if ($enforce_complexity &&
+			$this->options['pw_complexity_uppercase_length'] &&
+			$this->is_pw_missing_upper_chars($pw)) {
+			if ($errors !== null) {
+				$errors->add(self::ID . '_' . self::E_UPPERCASE,
+					$this->err($this->msg(self::E_UPPERCASE)),
 					array('form-field' => 'pass1')
 				);
 			}
