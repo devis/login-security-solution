@@ -2712,6 +2712,11 @@ Password MD5                 %5d     %s
 			$this->insert_fail($ip, $user_name, $pass_md5);
 		}
 		$fails = $this->get_login_fail($network_ip, $user_name, $pass_md5);
+		if ($match) {
+			###$this->log(__FUNCTION__, "duplicate");
+			$this->call_sleep($fails['total']);
+			return -4;
+		}
 		if ($this->options['login_fail_templock_user']
 			&& ($fails['total'] >= $this->options['login_fail_templock_user'])) {
 
@@ -2734,11 +2739,6 @@ Password MD5                 %5d     %s
 				$this->log(__FUNCTION__, "Disabling user: " . $user_name . ' ID: ' . $user->ID);
 				$this->set_user_account_disabled($user->ID);
 			}
-		}
-		if ($match) {
-			###$this->log(__FUNCTION__, "duplicate");
-			$this->call_sleep($fails['total']);
-			return -4;
 		}
 
 		if ($this->options['login_fail_notify']
