@@ -147,6 +147,7 @@ class login_security_solution {
 		'deactivate_deletes_data' => 0,
 		'disable_logins' => 0,
 		'idle_timeout' => 15,
+		'session_limit' => 1,
 		'login_fail_minutes' => 120,
 		'login_fail_tier_2' => 5,
 		'login_fail_tier_3' => 10,
@@ -274,6 +275,19 @@ class login_security_solution {
 
 
 	/**
+	 * Our usermeta key for tracking user sessions
+	 * @var array
+	 */
+	protected $umk_session_ids;
+
+	/**
+	 * The user's session id for this session
+	 * @var string
+	 */
+	protected $user_session_id;
+
+
+	/**
 	 * Declares the WordPress action and filter callbacks
 	 *
 	 * @return void
@@ -309,7 +323,7 @@ class login_security_solution {
 		add_action('wp_login_failed', array(&$this, 'wp_login_failed'));
 		add_action('wp_login', array(&$this, 'wp_login'), 1, 2);
 		add_filter('login_errors', array(&$this, 'login_errors'));
-		add_filter('login_message', array(&$this, 'login_message'));
+		add_filter('login_message', array(&$this, 'login_message'),999);
 
 		if ($this->options['block_author_query']) {
 			add_filter('wp_redirect', array(&$this, 'author_query_redirect'));
@@ -387,6 +401,11 @@ class login_security_solution {
 		$prefix = str_replace('`', '``', $prefix);
 		$this->table_fail = $prefix . $this->prefix . 'fail';
 
+		if ($this->is_session_active() === false) {
+			session_start();
+		}
+		$this->user_session_id = session_id();
+
 		$this->key_login_msg = self::ID . '-login-msg-id';
 		$this->option_name = self::ID . '-options';
 		$this->umk_changed = self::ID . '-pw-changed-time';
@@ -399,6 +418,7 @@ class login_security_solution {
 		$this->umk_verified_ips = self::ID . '-verified-ips';
 		$this->umk_locked_time = self::ID . '-lock-time';
 		$this->umk_disabled_account = self::ID . '-disabled-account';
+		$this->umk_session_ids = self::ID . '-session-ids';
 
 		$this->dir_dictionaries = dirname(__FILE__) . '/pw_dictionaries/';
 		$this->dir_sequences = dirname(__FILE__) . '/pw_sequences/';
@@ -516,6 +536,8 @@ class login_security_solution {
 			return -1;
 		}
 
+		$this->delete_user_session($user->ID, $this->user_session_id);
+
 		###$this->log(__FUNCTION__, $user->user_login);
 		return delete_user_meta($user->ID, $this->umk_last_active);
 	}
@@ -628,6 +650,12 @@ class login_security_solution {
 		 * NOTE: redirect_to_login() calls exit(), except when unit testing.
 		 */
 
+		if ($this->is_session_invalid($user->ID)) {
+			###$this->log(__FUNCTION__, "reached session limit");
+			$this->redirect_to_login('session_limit', true);
+			return -6;
+		}
+
 		if (!$this->is_xmlrpc) {
 			if ($this->is_idle($user->ID)) {
 				###$this->log(__FUNCTION__, "idle");
@@ -727,6 +755,8 @@ class login_security_solution {
 			$user_ID = $user->ID;
 		}
 
+		$this->delete_user_session($user_ID, $this->user_session_id);
+
 		return delete_user_meta($user_ID, $this->umk_last_active);
 	}
 
@@ -767,6 +797,23 @@ class login_security_solution {
 
 		echo $message_buffer;
 		return $message_buffer;
+	}
+
+	/**
+	 * Removes users session from meta
+	 *
+	 * @return mixed
+	 */
+	protected function delete_user_session($userID, $sessionID) {
+		if ($this->options['session_limit']) {
+			$meta_session_ids = get_user_meta($userID, $this->umk_session_ids, true) ?: array();
+			$key = array_search($sessionID, $meta_session_ids);
+			if ($key !== false) {
+				###$this->log(__FUNCTION__, 'unsetting session id');
+				unset($meta_session_ids[$key]);
+			}
+			return update_user_meta($userID, $this->umk_session_ids, $meta_session_ids);
+		}
 	}
 
 	/**
@@ -845,6 +892,10 @@ class login_security_solution {
 
 		if (!empty($_GET[$this->key_login_msg])) {
 			switch ($_GET[$this->key_login_msg]) {
+				case 'session_limit':
+					$ours = sprintf(__('You have reached your session limit of %d.', self::ID), $this->options['session_limit']);
+					$ours .= ' ' . __('Please close your other browsers and try again.', self::ID);
+					break;
 				case 'idle':
 					$ours = sprintf(__('It has been over %d minutes since your last action.', 'login-security-solution'), $this->options['idle_timeout']);
 					$ours .= ' ' . __('Please log back in.', 'login-security-solution');
@@ -1756,6 +1807,47 @@ Password MD5                 %5d     %s
 
 		$args['options'] = $this->options;
 		do_action('login_security_solution_insert_fail', $args);
+        }
+
+	/**
+	 * Determines if user has an active session
+	 *
+	 * @return bool
+	 */
+	protected function is_session_active() {
+		if ( php_sapi_name() !== 'cli' ) {
+			if ( version_compare(phpversion(), '5.4.0', '>=') ) {
+				return session_status() === PHP_SESSION_ACTIVE ? true : false;
+			} else {
+				return session_id() === '' ? false : true;
+			}
+		}
+		return false;
+	}
+
+
+	/**
+	 * Determines if PHP's exec() function is usable
+	 * @return bool
+	 */
+	protected function is_exec_available() {
+		static $available;
+
+		if (!isset($available)) {
+			$available = true;
+			if (ini_get('safe_mode')) {
+				$available = false;
+			} else {
+				$d = ini_get('disable_functions');
+				$s = ini_get('suhosin.executor.func.blacklist');
+				if ("$d$s") {
+					$array = preg_split('/,\s*/', "$d,$s");
+					if (in_array('exec', $array)) {
+						$available = false;
+					}
+				}
+			}
+                }
 	}
 
 	/**
@@ -1790,6 +1882,20 @@ Password MD5                 %5d     %s
 		$this->set_last_active($user_ID);
 
 		return false;
+	}
+
+
+	public function is_session_invalid($user_ID) {
+		if (!$this->options['session_limit'] || !$this->options['idle_timeout']) {
+			return null;
+		}
+
+		$meta_session_ids = get_user_meta($user_ID, $this->umk_session_ids, true) ?: array();
+		if (!empty($meta_session_ids) && !in_array($this->user_session_id, $meta_session_ids)) {
+			return true;
+		}
+		return false;
+
 	}
 
 	/**
@@ -2855,6 +2961,8 @@ Password MD5                 %5d     %s
 
 		###$this->log(__FUNCTION__, $user->user_login);
 
+		$this->update_user_session($user->ID);
+
 		if (!$this->is_xmlrpc) {
 			delete_user_meta($user->ID, $this->umk_last_active);
 		}
@@ -3100,6 +3208,45 @@ Password MD5                 %5d     %s
 		return true;
 	}
 
+	/*
+	 * Update the current sessions
+	 *
+	 * @param int $user_ID  the current user's ID number
+	 * @return int|bool  the record number if added, TRUE if updated, FALSE
+	 *                   if error
+	 */
+	protected function update_user_session($user_ID) {
+		if ($this->options['session_limit']) {
+			$meta_session_ids = get_user_meta($user_ID, $this->umk_session_ids, true) ?: array();
+
+			// Update older sessions with new timestamps
+			$time = array_search($this->user_session_id, $meta_session_ids);
+			if ($time !== false) {
+			  // replace the timestamp
+			  unset($meta_session_ids[$time]);
+			  $meta_session_ids[$this->get_time()] = $this->user_session_id;
+			}
+
+			// Garbage collect older unused sessions
+			foreach ($meta_session_ids as $time => $session_id) {
+				if (($this->options['idle_timeout'] * 60) + $time < $this->get_time() ) {
+					unset($meta_session_ids[$time]);
+				}
+			}
+
+			// Add new sessions
+			if (count($meta_session_ids) < $this->options['session_limit']) {
+				###$this->log(__FUNCTION__, 'count of sessions is less than limit');
+				if (!in_array($this->user_session_id, $meta_session_ids)) {
+					###$this->log(__FUNCTION__, 'current session id is not in user meta.. updating');
+					$meta_session_ids[$this->get_time()] = $this->user_session_id;
+				}
+			}
+			return update_user_meta($user_ID, $this->umk_session_ids, $meta_session_ids);
+		}
+	}
+
+
 	/**
 	 * Stores the present time in the given user's "last active" metadata
 	 *
@@ -3108,6 +3255,7 @@ Password MD5                 %5d     %s
 	 *                   if error
 	 */
 	protected function set_last_active($user_ID) {
+		$this->update_user_session($user_ID);
 		return update_user_meta($user_ID, $this->umk_last_active, time());
 	}
 

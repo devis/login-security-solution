@@ -272,6 +272,12 @@ class login_security_solution_admin extends login_security_solution {
 				'bool0' => __("Off, allow discovering authors.", 'login-security-solution'),
 				'bool1' => __("On, redirect requests to the home page.", 'login-security-solution'),
 			),
+			'session_limit' => array(
+				'group' => 'misc',
+				'label' => __("Concurrent Session Limit", self::ID),
+				'text' => __("The number of concurent sessions per user. NOTE: This feature only works when Idle Timeout is enabled. 0 disables this feature.", self::ID),
+				'type' => 'int',
+			),
 			'disable_logins' => array(
 				'group' => 'misc',
 				'label' => __("Maintenance Mode", 'login-security-solution'),
