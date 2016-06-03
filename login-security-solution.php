@@ -302,8 +302,8 @@ class login_security_solution {
 		add_action('auth_cookie_bad_hash', array(&$this, 'auth_cookie_bad'));
 		add_action('auth_cookie_valid', array(&$this, 'check'), 1, 2);
 		add_action('password_reset', array(&$this, 'password_reset'), 10, 2);
-		add_filter('allow_password_reset', array(&$this, 'allow_password_change'));
-		add_filter('show_password_fields', array(&$this, 'allow_password_change'));
+		add_filter('allow_password_reset', array(&$this, 'allow_password_change'), 10, 2);
+		add_filter('show_password_fields', array(&$this, 'allow_password_change'), 10, 2);
 		add_action( 'show_user_profile', array(&$this, 'use_current_password_field'), 1, 1);
 		add_action( 'edit_user_profile', array(&$this, 'use_current_password_field'), 1, 1);
 		add_action('user_profile_update_errors',
@@ -330,7 +330,7 @@ class login_security_solution {
 		}
 		add_action( 'show_user_profile', array(&$this, 'use_disabled_profile_field'));
 		add_action( 'edit_user_profile', array(&$this, 'use_disabled_profile_field'));
-		add_action( 'personal_options_update', array(&$this, 'use_disbled_profile_field_save' ));
+		add_action( 'personal_options_update', array(&$this, 'use_disabled_profile_field_save' ));
 		add_action( 'edit_user_profile_update', array(&$this, 'use_disabled_profile_field_save' ));
 
 		if ($this->options['disable_logins']) {
