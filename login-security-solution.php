@@ -164,7 +164,6 @@ class login_security_solution {
 		'pw_max_age_change_days' => 0,
 		'pw_min_age_change_days' => 0,
 		'pw_change_grace_period_minutes' => 15,
-		'pw_complexity_exemption_length' => 20,
 		'pw_dict_file' => '/usr/share/dictd/gcide.index',
 		'pw_change_grace_period_minutes' => 15,
 		'pw_complexity_exemption_length' => 20,
